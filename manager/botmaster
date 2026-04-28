@@ -1,0 +1,109 @@
+#!/bin/bash
+
+CONF="$HOME/BOTMaster/manager/bots.conf"
+
+get_service() {
+  BOT="$1"
+
+  if [ -z "$BOT" ]; then
+    echo ""
+    return
+  fi
+
+  awk -F: -v bot="$BOT" '$1 == bot {print $3; exit}' "$CONF"
+}
+
+list_bots() {
+  echo "Registrierte Bots:"
+  awk -F: '{print " - " $1 " (" $2 ") -> " $3}' "$CONF"
+}
+
+status_bot() {
+  BOT="$1"
+  SERVICE=$(get_service "$BOT")
+
+  if [ -z "$SERVICE" ]; then
+    echo "Bot nicht gefunden: $BOT"
+    exit 1
+  fi
+
+  systemctl --user status "$SERVICE"
+}
+
+start_bot() {
+  BOT="$1"
+  SERVICE=$(get_service "$BOT")
+
+  if [ -z "$SERVICE" ]; then
+    echo "Bot nicht gefunden: $BOT"
+    exit 1
+  fi
+
+  systemctl --user start "$SERVICE"
+}
+
+stop_bot() {
+  BOT="$1"
+  SERVICE=$(get_service "$BOT")
+
+  if [ -z "$SERVICE" ]; then
+    echo "Bot nicht gefunden: $BOT"
+    exit 1
+  fi
+
+  systemctl --user stop "$SERVICE"
+}
+
+restart_bot() {
+  BOT="$1"
+  SERVICE=$(get_service "$BOT")
+
+  if [ -z "$SERVICE" ]; then
+    echo "Bot nicht gefunden: $BOT"
+    exit 1
+  fi
+
+  systemctl --user restart "$SERVICE"
+}
+
+logs_bot() {
+  BOT="$1"
+  SERVICE=$(get_service "$BOT")
+
+  if [ -z "$SERVICE" ]; then
+    echo "Bot nicht gefunden: $BOT"
+    exit 1
+  fi
+
+  journalctl --user -u "$SERVICE" -f
+}
+
+case "$1" in
+  list)
+    list_bots
+    ;;
+  status)
+    status_bot "$2"
+    ;;
+  start)
+    start_bot "$2"
+    ;;
+  stop)
+    stop_bot "$2"
+    ;;
+  restart)
+    restart_bot "$2"
+    ;;
+  logs)
+    logs_bot "$2"
+    ;;
+  *)
+    echo "BOTMaster Befehle:"
+    echo "  ~/BOTMaster/manager/botmaster list"
+    echo "  ~/BOTMaster/manager/botmaster status BOTNAME"
+    echo "  ~/BOTMaster/manager/botmaster start BOTNAME"
+    echo "  ~/BOTMaster/manager/botmaster stop BOTNAME"
+    echo "  ~/BOTMaster/manager/botmaster restart BOTNAME"
+    echo "  ~/BOTMaster/manager/botmaster logs BOTNAME"
+    ;;
+esac
