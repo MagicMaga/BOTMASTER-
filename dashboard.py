@@ -1,12 +1,159 @@
-from flask import Flask, redirect, url_for
+from flask import Flask, redirect, url_for, request, session
 import subprocess
+import os
+import hmac
+import base64
+import hashlib
+from functools import wraps
 import psutil
 import html
 from pathlib import Path
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("BOTCONTROL_SECRET_KEY")
 
 CONF = Path.home() / "BOTMaster" / "manager" / "bots.conf"
+
+def verify_password_hash(password, stored_hash):
+    try:
+        algo, iterations, salt_b64, digest_b64 = stored_hash.split("$", 3)
+
+        if algo != "pbkdf2_sha256":
+            return False
+
+        salt = base64.b64decode(salt_b64)
+        expected = base64.b64decode(digest_b64)
+        actual = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode(),
+            salt,
+            int(iterations)
+        )
+
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
+
+def login_required(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not session.get("botcontrol_logged_in"):
+            return redirect(url_for("login"))
+        return func(*args, **kwargs)
+    return wrapper
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not app.secret_key:
+        return "BOTCONTROL_SECRET_KEY fehlt", 500
+
+    expected_user = os.environ.get("BOTCONTROL_USER", "sven")
+    expected_hash = os.environ.get("BOTCONTROL_PASSWORD_HASH", "")
+
+    error = ""
+
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+
+        if username == expected_user and verify_password_hash(password, expected_hash):
+            session["botcontrol_logged_in"] = True
+            return redirect(url_for("home"))
+
+        error = "Login fehlgeschlagen"
+
+    return f'''
+    <!doctype html>
+    <html>
+    <head>
+        <title>BOTControl Login</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body {{
+                margin: 0;
+                min-height: 100vh;
+                display: grid;
+                place-items: center;
+                font-family: Arial, sans-serif;
+                background: linear-gradient(180deg, #020617 0%, #0f172a 100%);
+                color: white;
+            }}
+            .box {{
+                width: min(420px, calc(100vw - 32px));
+                background: #1e293b;
+                border: 1px solid #334155;
+                border-radius: 24px;
+                padding: 28px;
+                box-shadow: 0 18px 40px rgba(0,0,0,.35);
+            }}
+            h1 {{
+                margin: 0 0 20px;
+                font-size: 30px;
+            }}
+            label {{
+                display: block;
+                margin-top: 14px;
+                color: #cbd5e1;
+                font-weight: 700;
+            }}
+            input {{
+                width: 100%;
+                margin-top: 7px;
+                padding: 13px;
+                border-radius: 12px;
+                border: 1px solid #475569;
+                background: #020617;
+                color: white;
+                font-size: 16px;
+            }}
+            button {{
+                width: 100%;
+                margin-top: 22px;
+                padding: 14px;
+                border: 0;
+                border-radius: 13px;
+                background: #2563eb;
+                color: white;
+                font-size: 16px;
+                font-weight: 900;
+                cursor: pointer;
+            }}
+            .error {{
+                margin-top: 14px;
+                color: #f87171;
+                font-weight: 800;
+            }}
+            .hint {{
+                margin-top: 16px;
+                color: #64748b;
+                font-size: 14px;
+            }}
+        </style>
+    </head>
+    <body>
+        <form class="box" method="post">
+            <h1>BOTControl Login 🔐</h1>
+
+            <label>Benutzer</label>
+            <input name="username" autocomplete="username" autofocus>
+
+            <label>Passwort</label>
+            <input name="password" type="password" autocomplete="current-password">
+
+            <button type="submit">Einloggen</button>
+
+            <div class="error">{html.escape(error)}</div>
+            <div class="hint">BOTMaster Control ist geschützt.</div>
+        </form>
+    </body>
+    </html>
+    '''
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
 
 def run_cmd(cmd):
     return subprocess.run(cmd, capture_output=True, text=True)
@@ -86,6 +233,7 @@ def status_style(status):
     return "⚪", "#94a3b8", status.upper()
 
 @app.route("/")
+@login_required
 def home():
     bots = load_bots()
 
@@ -239,6 +387,9 @@ def home():
             <div class="stats">
                 CPU: {cpu}% | RAM: {ram}% | DISK: {disk}%
             </div>
+            <div style="margin-top:14px;">
+                <a style="background:#334155;padding:9px 13px;border-radius:10px;font-size:13px;" href="/logout">Logout</a>
+            </div>
         </header>
 
         <main class="grid">
@@ -253,6 +404,7 @@ def home():
     """
 
 @app.route("/start/<bot>")
+@login_required
 def start(bot):
     bots = load_bots()
     if bot in bots:
@@ -260,6 +412,7 @@ def start(bot):
     return redirect(url_for("home"))
 
 @app.route("/stop/<bot>")
+@login_required
 def stop(bot):
     bots = load_bots()
     if bot in bots:
@@ -267,6 +420,7 @@ def stop(bot):
     return redirect(url_for("home"))
 
 @app.route("/restart/<bot>")
+@login_required
 def restart(bot):
     bots = load_bots()
     if bot in bots:
@@ -274,6 +428,7 @@ def restart(bot):
     return redirect(url_for("home"))
 
 @app.route("/logs/<bot>")
+@login_required
 def logs(bot):
     bots = load_bots()
 
